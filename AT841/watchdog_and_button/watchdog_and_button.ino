@@ -5,6 +5,8 @@
 
 
 #define BUTTON_PIN PIN_PB1
+#define SIGNAL_LED_PIN PIN_PA0
+
 
 uint32_t volatile watchdog_timer = 0;
 uint32_t volatile button = 0;
@@ -22,10 +24,13 @@ void buttonHandler() {
 
 
 void setup() {
-  pinMode(PIN_PA0, OUTPUT);
+  pinMode(SIGNAL_LED_PIN, OUTPUT);
   pinMode(BUTTON_PIN, INPUT_PULLUP);
+
   watchdog_timer = 0;
   button = 0;
+  ADCSRA = 0;   // vypnutí AD převodníku pro snižení spotřeby
+
 }
 
 void loop() {
@@ -44,9 +49,9 @@ void loop() {
 
 void blink(int cnt) {
   for (; cnt > 0; cnt--) {
-    digitalWrite(PIN_PA0, HIGH);
+    digitalWrite(SIGNAL_LED_PIN, HIGH);
     delay(150);
-    digitalWrite(PIN_PA0, LOW);
+    digitalWrite(SIGNAL_LED_PIN, LOW);
     delay(200);
   }
 }
@@ -56,15 +61,18 @@ void goSleep()
 {
   cli();
   wdt_reset();
-  WDTCSR = _BV(WDE) | _BV(WDIE) | _BV(WDP0) | _BV(WDP3);
+  WDTCSR = _BV(WDE) | _BV(WDIE) |  _BV(WDP3);
   attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), buttonHandler, LOW);
+
   sleep_enable();
   set_sleep_mode(SLEEP_MODE_PWR_DOWN);
   sei();
 
   sleep_mode();
+
   cli();
   wdt_reset();
   detachInterrupt(BUTTON_PIN);
+
   sei();
 }
