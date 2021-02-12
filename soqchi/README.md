@@ -54,5 +54,9 @@ Datové zprávy jsou odeslány na SIGFOX cloud.
    * data[4-9] - ASCII číslice s hodnotou napětí v mV
 
 
+## Dokumentace
+
+* [https://github.com/SpenceKonde/ATTinyCore/blob/master/avr/extras/ATtiny_x41.md](ATTiny x41)
+* [https://ww1.microchip.com/downloads/en/DeviceDoc/Atmel-8495-8-bit-AVR-Microcontrollers-ATtiny441-ATtiny841_Datasheet.pdf](841 Datasheet)
 
 
