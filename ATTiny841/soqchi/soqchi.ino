@@ -3,9 +3,9 @@
 #include <avr/wdt.h> //Needed to enable/disable watch dog timer
 #include <avr/interrupt.h>  //needed for watchdog interrupt
 
-#define MODEM_ENABLED    false            // nastavit na true pro ladění, aby se moc neposílalo zpráv
+#define MODEM_ENABLED    true             // nastavit na false pro ladění, aby se moc neposílalo zpráv
 
-#define CLOSE_DOOR_DELAY_MILLIS 5000    // doba po uzavření, kdy se nuluje alarm a odesílá se info o zavření
+#define CLOSE_DOOR_DELAY_MILLIS 120000    // doba po uzavření, kdy se nuluje alarm a odesílá se info o zavření
 
 #define SENSOR_PIN        PIN_PB1       // pin pro interrupt  (senzor)     
 #define INTR_LED          PIN_PB2       // dioda signalizující že nastalo přerušení od senzoru
@@ -34,7 +34,14 @@ bool volatile     doorOpenEvent = false;            // do true přepne otevřen�
 
 bool              alarm = false;                    // stav "poplachu"
 unsigned long     closeTimeOK;                      // čas pro smazání alarmu - nastaví zavření dveří jako millis()+CLOSE_DOOR_DELAY_MILLIS
-bool              infoMode;                         // pokud se při startu drží tlačítko "check", zapiná se "info" režim
+bool              infoMode;                         // pokud se při startu po v době rozsvícení diody stiskne tlačítko "check", 
+                                                    // zapiná se "info" režim
+
+// ----------------------------------------------
+bool isDoorClosed() {
+  return digitalRead(SENSOR_PIN) == HIGH;
+}
+
 
 // -------- interrupt handlery ------------------
 
@@ -56,11 +63,7 @@ void ISR_sensorHandler() {
   doorOpenEvent = true;
 }
 
-// ---------------------------------------------------
 
-bool isDoorClosed() {
-  return digitalRead(SENSOR_PIN) == HIGH;
-}
 
 // ----------------------------------------------
 // ---------------  S E T U P   -----------------
@@ -131,7 +134,7 @@ void loop() {
     } else {
       // jsme probuzeni watchdogem
 
-      // cca 1x za 48 hodin info o stavu
+      // cca 1x za 48 hodin info o stavu (heartbeat)
       if ( watchdogTimer % 21600 == 0 ) {
         sendState(isDoorClosed());
       }
@@ -264,11 +267,13 @@ bool modemWakeUp() {
   return sendAtCmd(AT_CHECK);
 }
 
-
+// inicializuje port, překontroluje, zda odpovídá na AT příkaz 
+// a pošle ho do hlubokého spánku
 bool initModem() {
   if (!MODEM_ENABLED) {
     return true;
   }
+  
   Serial.begin(9600);
   if (!Serial) {
     return false;
@@ -345,7 +350,7 @@ String toHEX(String s) {
 }
 
 // -------------------------------------------------------
-// interpretuje pattern jako morseovku
+// interpretuje pattern jako morseovku na info LED diodě
 // 01 - tečka
 // 10 - čárka
 // 11 - mezera mezi písmeny
