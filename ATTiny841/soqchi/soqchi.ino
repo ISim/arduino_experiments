@@ -4,14 +4,18 @@
 #include <avr/interrupt.h>  //needed for watchdog interrupt
 
 #define MODEM_ENABLED    true             // nastavit na false pro ladění, aby se moc neposílalo zpráv
+#define EXTERNAL_ALARM   true             // pokud je true, tak se při alarmu odesílá žádost o downlink
+//  - pokud downlink vrátí první bajt 01 - je vstup povolen a ext. siréna se nevyvolá
 
 #define CLOSE_DOOR_DELAY_MILLIS 120000    // doba po uzavření, kdy se nuluje alarm a odesílá se info o zavření
+#define CLEAR_EXT_ALARM_TIMEOUT 60000     // pokud je aktivován ext. alarm a není drženo "test" tlačítko
 
 #define SENSOR_PIN        PIN_PB1       // pin pro interrupt  (senzor)     
 #define INTR_LED          PIN_PB2       // dioda signalizující že nastalo přerušení od senzoru
 #define SIGNAL_LED_PIN    PIN_PA0       // signalizační dioda - informace
 #define MODEM_WAKEUP_PIN  PIN_PB0       // reset modemu  
 #define BUTTON_PIN        PIN_PA7       // info tlačítko   
+#define SIGNAL_EXT_ALARM  PIN_PA5       // signál pro spuštění sirény (externí alarm)
 
 
 #define AT_SLEEP        "AT$P=2\n"
@@ -32,10 +36,12 @@
 uint32_t volatile watchdogTimer = 10;               // tikáček - 10 je nastaveno, aby se neblokovalo odeslání info zprávy  po startu
 bool volatile     doorOpenEvent = false;            // do true přepne otevření dveří
 
-bool              alarm = false;                    // stav "poplachu"
+bool              alarm         = false;            // stav "poplachu"
+bool              accessAllowed = false;            // indikuje informaci o povoleném vstupu z downlinku
 unsigned long     closeTimeOK;                      // čas pro smazání alarmu - nastaví zavření dveří jako millis()+CLOSE_DOOR_DELAY_MILLIS
-bool              infoMode;                         // pokud se při startu po v době rozsvícení diody stiskne tlačítko "check", 
-                                                    // zapiná se "info" režim
+unsigned long     alarmTime;                        // čas vyvolání alarmu
+bool              infoMode;                         // pokud se při startu po v době rozsvícení diody stiskne tlačítko "check",
+// zapiná se "info" režim
 
 // ----------------------------------------------
 bool isDoorClosed() {
@@ -71,11 +77,14 @@ void ISR_sensorHandler() {
 void setup() {
   pinMode(SIGNAL_LED_PIN, OUTPUT);
   pinMode(INTR_LED, OUTPUT);
+  pinMode(SIGNAL_EXT_ALARM, OUTPUT);
+
   digitalWrite(INTR_LED, LOW);
-    
+  digitalWrite(SIGNAL_EXT_ALARM, LOW);
+
   pinMode(SENSOR_PIN, INPUT_PULLUP);
   pinMode(BUTTON_PIN, INPUT_PULLUP);
-  
+
   pinMode(MODEM_WAKEUP_PIN, OUTPUT);
   digitalWrite(MODEM_WAKEUP_PIN, HIGH);
 
@@ -129,6 +138,7 @@ void loop() {
           LED_ERROR();
         }
       }
+      alarmTime = millis() + CLEAR_EXT_ALARM_TIMEOUT;
       closeTimeOK = millis() + CLOSE_DOOR_DELAY_MILLIS; // min čas, kdy bude alarm zrušen, pokud se dveře zavřou
 
     } else {
@@ -148,17 +158,29 @@ void loop() {
       if ( millis() >=  closeTimeOK ) {
         sendState(isDoorClosed());
         alarm = false;            // vypínáme alarm
+        extAlarmOff();
       }
     } else {
       if ( digitalRead(BUTTON_PIN) == LOW ) {
-        LED_TEST();
-        if ( sendState(isDoorClosed()) ) {
-          LED_OK();
+        if ( !accessAllowed ) {
+          if (  millis() > (alarmTime - 1000) ) {
+            LED_OK();
+            delay(1000);
+            LED_OK();
+            accessAllowed = true;
+          }
         } else {
-          LED_ERROR();
+          LED_TEST();
+          if ( sendState(isDoorClosed()) ) {
+            LED_OK();
+          } else {
+            LED_ERROR();
+          }
         }
       }
-
+      if ( !accessAllowed && millis() > alarmTime ) {
+        extAlarmOn();
+      }
       // jsme v alarmu, dveře stále otevřené - protáhneme čas
       closeTimeOK = millis() + CLOSE_DOOR_DELAY_MILLIS;
     }
@@ -199,7 +221,7 @@ void goSleep()
   sleep_enable();
 
   doorOpenEvent = false;
-  attachInterrupt(digitalPinToInterrupt(SENSOR_PIN), ISR_sensorHandler, LOW ); 
+  attachInterrupt(digitalPinToInterrupt(SENSOR_PIN), ISR_sensorHandler, LOW );
   sei();
   sleep_cpu();            // now goes to Sleep and waits for the interrupt
 }
@@ -267,13 +289,13 @@ bool modemWakeUp() {
   return sendAtCmd(AT_CHECK);
 }
 
-// inicializuje port, překontroluje, zda odpovídá na AT příkaz 
+// inicializuje port, překontroluje, zda odpovídá na AT příkaz
 // a pošle ho do hlubokého spánku
 bool initModem() {
   if (!MODEM_ENABLED) {
     return true;
   }
-  
+
   Serial.begin(9600);
   if (!Serial) {
     return false;
@@ -293,9 +315,25 @@ bool sendAlarm() {
   }
 
   String cmd = AT_SEND_FRAME;
-  cmd += "FF\n";
+  if (EXTERNAL_ALARM) {
+    cmd += "FF,1\n";   // zadost o downlink data
+  } else {
+    cmd += "FF\n";
+  }
 
-  bool result = sendAtCmd(cmd.c_str());
+  modemAtCmd(cmd.c_str());
+  String resp = modemResponse();
+
+  bool result = resp.startsWith("OK");
+
+  if (result && EXTERNAL_ALARM) {
+    // pokud downlink vrátil první hexa 01, je přístup povolen
+    // a externí alarm se nebude volat
+    if ( resp.indexOf("RX=01") != -1 ) {
+      accessAllowed = true;
+    }
+  }
+
   modemSleep();
 
   return result;
@@ -347,6 +385,17 @@ String toHEX(String s) {
     tmp += (( hex.length() == 1 ? "0" : "") + hex);
   }
   return tmp;
+}
+
+// -------------------------------------------------------
+void extAlarmOn() {
+  if (EXTERNAL_ALARM) {
+    digitalWrite(SIGNAL_EXT_ALARM, HIGH);
+  }
+}
+
+void extAlarmOff() {
+  digitalWrite(SIGNAL_EXT_ALARM, LOW);
 }
 
 // -------------------------------------------------------
