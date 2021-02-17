@@ -32,6 +32,11 @@
 #define LED_TEST()    infoLED(0b10110101011110)        // TST  - signalizace testu - bude odeslána info zpráva
 #define LED_INFO()    infoLED(0b0101)                  // I    - potvrzení režimu "Info"
 
+#define STATUS_ALARM        0x80
+#define STATUS_DOOR_CLOSED  0x00
+#define STATUS_DOOR_OPEN    0x01
+#define STATUS_INFO         0x40
+#define STATUS_HEARTBEAT    0x20
 
 uint32_t volatile watchdogTimer = 10;               // tikáček - 10 je nastaveno, aby se neblokovalo odeslání info zprávy  po startu
 bool volatile     doorOpenEvent = false;            // do true přepne otevření dveří
@@ -48,6 +53,9 @@ bool isDoorClosed() {
   return digitalRead(SENSOR_PIN) == HIGH;
 }
 
+byte encodeDoorState(byte state) {
+  return state | ( isDoorClosed() ? STATUS_DOOR_CLOSED : STATUS_DOOR_OPEN );  
+}
 
 // -------- interrupt handlery ------------------
 
@@ -144,9 +152,9 @@ void loop() {
     } else {
       // jsme probuzeni watchdogem
 
-      // cca 1x za 48 hodin info o stavu (heartbeat)
-      if ( watchdogTimer % 21600 == 0 ) {
-        sendState(isDoorClosed());
+      // cca 1x za 24 hodin info o stavu (heartbeat)
+      if ( watchdogTimer % 10536 == 0 ) {
+        sendState(encodeDoorState(STATUS_HEARTBEAT) );
       }
     }
 
@@ -156,7 +164,7 @@ void loop() {
     if (isDoorClosed() ) {
 
       if ( millis() >=  closeTimeOK ) {
-        sendState(isDoorClosed());
+        sendState( encodeDoorState(STATUS_INFO) );
         alarm = false;            // vypínáme alarm
         extAlarmOff();
       }
@@ -171,7 +179,7 @@ void loop() {
           }
         } else {
           LED_TEST();
-          if ( sendState(isDoorClosed()) ) {
+          if ( sendState(encodeDoorState(STATUS_INFO | STATUS_HEARTBEAT ) ) ) {
             LED_OK();
           } else {
             LED_ERROR();
@@ -314,12 +322,12 @@ bool sendAlarm() {
     return false;
   }
 
-  String cmd = AT_SEND_FRAME;
+  String cmd = AT_SEND_FRAME + byteToHEX( encodeDoorState(STATUS_ALARM) );
   if (EXTERNAL_ALARM) {
-    cmd += "FF,1\n";   // zadost o downlink data
-  } else {
-    cmd += "FF\n";
-  }
+    cmd += ",1";   // zadost o downlink data
+  } 
+
+  cmd += "\n";
 
   modemAtCmd(cmd.c_str());
   String resp = modemResponse();
@@ -342,7 +350,7 @@ bool sendAlarm() {
 
 // stav - zjistí se stav baterie a pošle se současně
 // se stavem sensoru
-bool sendState(bool closed) {
+bool sendState(byte status) {
   if (!MODEM_ENABLED) {
     return true;  // debug - jako že jsme to poslali
   }
@@ -361,12 +369,8 @@ bool sendState(bool closed) {
     voltage = voltage.substring(0, 4);
   }
 
-  String cmd = AT_SEND_FRAME;
-  if (closed) {
-    cmd += "00";
-  } else {
-    cmd += "01";
-  }
+  String cmd = AT_SEND_FRAME + byteToHEX(status);
+  
   cmd += toHEX(temp);
   cmd += toHEX(voltage);
   cmd += "\n";
@@ -376,13 +380,16 @@ bool sendState(bool closed) {
   return result;
 }
 
+String byteToHEX(byte b) {
+    String hex = String(b, HEX);
+    return (( hex.length() == 1 ? "0" : "") + hex);
+}
+
 String toHEX(String s) {
   String tmp = "";
-  String hex;
 
   for (int i = 0; i < s.length(); i++ ) {
-    hex = String(byte(s.charAt(i)), HEX);
-    tmp += (( hex.length() == 1 ? "0" : "") + hex);
+    tmp += byteToHEX(  s.charAt(i) );
   }
   return tmp;
 }
