@@ -98,7 +98,7 @@ func (c *Client) SaveHeartbeat(ctx context.Context, deviceID string, t time.Time
 		return err
 	}
 
-	_, err = c.c.Collection(collectionDevices).Doc(deviceID).Collection(collectionHeartbeats).NewDoc().Create(ctx, Heartbeat{
+	_, err = c.c.Collection(collectionDevices).Doc(deviceID).Collection(collectionHeartbeats).Doc(t.UTC().Format(time.RFC3339)).Set(ctx, Heartbeat{
 		ReceivedAt: t,
 		Voltage:    voltage,
 		Temp:       temperature,
