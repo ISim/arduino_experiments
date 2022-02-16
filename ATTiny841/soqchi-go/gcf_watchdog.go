@@ -7,6 +7,7 @@ import (
 	"github.com/ISim/Arduino/soqchigfc/firestore"
 	"github.com/ISim/Arduino/soqchigfc/pubsub"
 	"github.com/ISim/Arduino/soqchigfc/soqchi"
+	"log"
 	"time"
 )
 
@@ -60,6 +61,7 @@ func (w *watchdog) handle() error {
 			if err != nil {
 				return err
 			}
+			log.Printf("device: %s, chats: %#v", device.ID, chats)
 			return f(w.ctx, device, chats)
 		}
 
